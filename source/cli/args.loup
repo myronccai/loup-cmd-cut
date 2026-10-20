@@ -1,98 +1,161 @@
 @mode(host.dual)
 
-# Command-line parsing. Loup 1.26 has no CLI library, so arguments are
-# parsed by hand into an Options value.
-#
-# Grammar: [OPTIONS] COMMAND [OPERANDS...]
-#   Options may appear anywhere before `--`; everything after `--` is an
-#   operand. Value options accept `--name VALUE` and `--name=VALUE`.
+# Command-line parsing for cut. Options are scanned with getopt's rules
+# (cli/getopt.loup) and then checked in GNU cut's order: the checks GNU
+# makes while reading options come first, in command-line order, then the
+# ones it makes afterwards, and last the LIST itself.
 
-pub const DEFAULT_GREETING: string = "Hello";
+from cli.getopt import (OptSpec, opt, scan_options);
+from commands.ranges import (Range, parse_list, complement);
+
+pub enum Mode {
+    Bytes,
+    Characters,
+    Fields,
+}
 
 pub struct Options {
-    pub command: string;
-    pub operands: list[string];
     pub help: bool;
     pub version: bool;
-    pub verbose: bool;
-    pub shout: bool;
-    pub greeting: string;
+    pub mode: Mode;
+    # Sorted, merged and, with --complement, already inverted.
+    pub ranges: list[Range];
+    # One character: TAB by default, NUL for `-d ''`.
+    pub delimiter: string;
+    pub output_delimiter: string;
+    # Whether --output-delimiter was given (it matters for -b and -c).
+    pub explicit_output_delimiter: bool;
+    pub only_delimited: bool;
+    # "\n", or NUL with -z.
+    pub terminator: string;
+    pub files: list[string];
+}
+
+pub func nul(): string {
+    return str(char.of(0));
+}
+
+func specs(): list[OptSpec] {
+    return [
+        opt("b", "bytes", true, "b"),
+        opt("c", "characters", true, "c"),
+        opt("d", "delimiter", true, "d"),
+        opt("f", "fields", true, "f"),
+        opt("n", "", false, "n"),
+        opt("", "complement", false, "complement"),
+        opt("s", "only-delimited", false, "s"),
+        opt("", "output-delimiter", true, "output-delimiter"),
+        opt("z", "zero-terminated", false, "z"),
+        opt("", "help", false, "help"),
+        opt("", "version", false, "version"),
+    ];
+}
+
+func info_only(help: bool, version: bool): Options {
+    let none: list[Range] = [];
+    let no_files: list[string] = [];
+    return Options(
+        help = help,
+        version = version,
+        mode = Mode.Fields,
+        ranges = none,
+        delimiter = "\t",
+        output_delimiter = "\t",
+        explicit_output_delimiter = false,
+        only_delimited = false,
+        terminator = "\n",
+        files = no_files,
+    );
 }
 
 pub func parse_args(argv: list[string]): Result[Options, string] {
-    var command = "";
-    var operands: list[string] = [];
-    var help = false;
-    var version = false;
-    var verbose = false;
-    var shout = false;
-    var greeting = DEFAULT_GREETING;
-    var only_operands = false;
+    let scan = match scan_options(argv, specs()) {
+        Ok(s) => s,
+        Err(msg) => {
+            return Err(msg);
+        },
+    };
 
-    var i = 0;
-    while (i < argv.len()) {
-        let arg = argv[i];
-        i += 1;
+    var mode = Mode.Fields;
+    var list_text = "";
+    var have_list = false;
+    var delimiter = "\t";
+    var delimiter_given = false;
+    var output_delimiter = "";
+    var output_given = false;
+    var only_delimited = false;
+    var complement_wanted = false;
+    var terminator = "\n";
 
-        if (only_operands or arg == "-" or !arg.startsWith("-")) {
-            if (command.is_empty()) {
-                command = arg;
+    for (hit in scan.hits) {
+        let key = hit.key;
+        if (key == "help") {
+            return Ok(info_only(true, false));
+        } else if (key == "version") {
+            return Ok(info_only(false, true));
+        } else if (key == "b" or key == "c" or key == "f") {
+            if (have_list) {
+                return Err("only one list may be specified");
+            }
+            have_list = true;
+            list_text = hit.value;
+            mode = if (key == "b") {
+                Mode.Bytes
+            } else if (key == "c") {
+                Mode.Characters
             } else {
-                operands.push(arg);
+                Mode.Fields
+            };
+        } else if (key == "d") {
+            if (hit.value.len() > 1) {
+                return Err("the delimiter must be a single character");
             }
-            continue;
-        }
-        if (arg == "--") {
-            only_operands = true;
-            continue;
-        }
-
-        # Split `--name=value` into its name and inline value.
-        var name = arg;
-        var inline_value: Option[string] = None;
-        if (arg.startsWith("--") and arg.contains("=")) {
-            let parts = arg.split("=");
-            name = parts[0];
-            inline_value = Some(parts.slice(1).join("="));
-        }
-
-        if (name == "-g" or name == "--greeting") {
-            match inline_value {
-                Some(v) => { greeting = v; },
-                None => {
-                    if (i >= argv.len()) {
-                        return Err(i"option '{$ name $}' requires a value");
-                    }
-                    greeting = argv[i];
-                    i += 1;
-                },
-            }
-            continue;
-        }
-
-        if (inline_value.is_some()) {
-            return Err(i"option '{$ name $}' does not take a value");
-        }
-        if (name == "-h" or name == "--help") {
-            help = true;
-        } else if (name == "-V" or name == "--version") {
-            version = true;
-        } else if (name == "-v" or name == "--verbose") {
-            verbose = true;
-        } else if (name == "--shout") {
-            shout = true;
-        } else {
-            return Err(i"unknown option '{$ name $}'");
+            delimiter = if (hit.value.len() == 0) { nul() } else { hit.value };
+            delimiter_given = true;
+        } else if (key == "output-delimiter") {
+            output_delimiter = if (hit.value.len() == 0) { nul() } else { hit.value };
+            output_given = true;
+        } else if (key == "s") {
+            only_delimited = true;
+        } else if (key == "complement") {
+            complement_wanted = true;
+        } else if (key == "z") {
+            terminator = nul();
         }
     }
 
+    if (!have_list) {
+        return Err("you must specify a list of bytes, characters, or fields");
+    }
+    if (mode != Mode.Fields) {
+        if (delimiter_given) {
+            return Err("an input delimiter may be specified only when operating on fields");
+        }
+        if (only_delimited) {
+            return Err("suppressing non-delimited lines makes sense\n\tonly when operating on fields");
+        }
+    }
+
+    var ranges = match parse_list(list_text, mode != Mode.Fields) {
+        Ok(r) => r,
+        Err(msg) => {
+            return Err(msg);
+        },
+    };
+    if (complement_wanted) {
+        ranges = complement(ranges);
+    }
+
     return Ok(Options(
-        command = command,
-        operands = operands,
-        help = help,
-        version = version,
-        verbose = verbose,
-        shout = shout,
-        greeting = greeting,
+        help = false,
+        version = false,
+        mode = mode,
+        ranges = ranges,
+        delimiter = delimiter,
+        output_delimiter = if (output_given) { output_delimiter } else { delimiter },
+        explicit_output_delimiter = output_given,
+        only_delimited = only_delimited,
+        terminator = terminator,
+        files = scan.operands,
     ));
 }

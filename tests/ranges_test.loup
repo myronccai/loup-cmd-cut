@@ -1,0 +1,79 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from commands.ranges import (END, Range, parse_list, complement, merge, is_selected, starts_range);
+
+func show(ranges: list[Range]): string {
+    var parts: list[string] = [];
+    for (r in ranges) {
+        let hi = if (r.hi == END) { "" } else { str(r.hi) };
+        parts.push(if (r.lo == r.hi) { str(r.lo) } else { i"{$ r.lo $}-{$ hi $}" });
+    }
+    return parts.join(",");
+}
+
+func fields(text: string): string {
+    return show(parse_list(text, false).unwrap());
+}
+
+func field_error(text: string): string {
+    return parse_list(text, false).unwrap_err();
+}
+
+func test_forms(): void {
+    expectEq(fields("3"), "3", "N");
+    expectEq(fields("3-"), "3-", "N-");
+    expectEq(fields("2-4"), "2-4", "N-M");
+    expectEq(fields("-4"), "1-4", "-M");
+    expectEq(fields("1,3-5,7-"), "1,3-5,7-", "mixed");
+}
+
+func test_separators(): void {
+    expectEq(fields("1 3"), "1,3", "blank");
+    expectEq(fields("1\t3"), "1,3", "tab");
+}
+
+func test_sorted_and_merged(): void {
+    expectEq(fields("5,1"), "1,5", "sorted");
+    expectEq(fields("1-3,2-6"), "1-6", "overlap merged");
+    expectEq(fields("4-,2-5"), "2-", "open range absorbs");
+    expectEq(fields("1-2,3-4"), "1-2,3-4", "adjacent kept apart");
+    expectEq(fields("2,2,2"), "2", "duplicates");
+    expectEq(show(merge([Range(lo = 3, hi = 3), Range(lo = 1, hi = 9)])), "1-9", "merge");
+}
+
+func test_complement(): void {
+    expectEq(show(complement(parse_list("2,4-5", false).unwrap())), "1,3,6-", "gaps");
+    expectEq(show(complement(parse_list("1-", false).unwrap())), "", "nothing left");
+    expectEq(show(complement(parse_list("1-2,3-4", false).unwrap())), "5-", "adjacent");
+}
+
+func test_errors(): void {
+    expectEq(field_error("0"), "fields are numbered from 1", "zero");
+    expectEq(field_error("0-2"), "fields are numbered from 1", "zero start");
+    expectEq(field_error("1,,2"), "fields are numbered from 1", "empty item");
+    expectEq(field_error(""), "fields are numbered from 1", "empty list");
+    expectEq(field_error("3-1"), "invalid decreasing range", "decreasing");
+    expectEq(field_error("-"), "invalid range with no endpoint: -", "lone dash");
+    expectEq(field_error("1-2-3"), "invalid field range", "two dashes");
+    expectEq(field_error("1x2"), "invalid field value 'x2'", "letter");
+    expectEq(field_error("99999999999999999999"), "field number '99999999999999999999' is too large", "too large");
+}
+
+func test_position_wording(): void {
+    expectEq(parse_list("0", true).unwrap_err(), "byte/character positions are numbered from 1", "zero");
+    expectEq(parse_list("a", true).unwrap_err(), "invalid byte/character position 'a'", "letter");
+    expectEq(parse_list("1--2", true).unwrap_err(), "invalid byte or character range", "two dashes");
+    expectEq(parse_list("1-99999999999999999999", true).unwrap_err(), "byte/character offset '99999999999999999999' is too large", "too large");
+}
+
+func test_selection(): void {
+    let r = parse_list("2-3,6-", false).unwrap();
+    expect(!is_selected(r, 1), "1");
+    expect(is_selected(r, 2) and is_selected(r, 3), "2 and 3");
+    expect(!is_selected(r, 5), "5");
+    expect(is_selected(r, 1000000), "open end");
+    expect(starts_range(r, 6, 6), "6 starts a range");
+    expect(!starts_range(r, 3, 3), "3 does not");
+    expect(starts_range(r, 5, 7), "a range starts within 5-7");
+}

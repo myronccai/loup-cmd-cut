@@ -1,0 +1,4 @@
+root:x:0:0:root:/root:/bin/bash
+daemon:x:1:1:daemon:/usr/sbin:/usr/sbin/nologin
+ann:x:1000:1000:Ann Lee,,,:/home/ann:/bin/zsh
+# no delimiter on this line

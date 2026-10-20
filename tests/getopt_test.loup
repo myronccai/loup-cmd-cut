@@ -1,0 +1,79 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from cli.getopt import (OptSpec, Scan, opt, scan_options);
+
+func specs(): list[OptSpec] {
+    return [
+        opt("a", "all", false, "a"),
+        opt("d", "delimiter", true, "d"),
+        opt("", "count", false, "count"),
+        opt("", "complement", false, "complement"),
+        opt("", "help", false, "help"),
+    ];
+}
+
+func scan(argv: list[string]): Scan {
+    return scan_options(argv, specs()).unwrap();
+}
+
+func error_of(argv: list[string]): string {
+    return scan_options(argv, specs()).unwrap_err();
+}
+
+func test_operands_and_options_mix(): void {
+    let s = scan(["x", "-a", "y"]);
+    expectEq(s.hits.len(), 1, "one option");
+    expectEq(s.hits[0].key, "a", "key");
+    expectEq(s.operands.len(), 2, "two operands");
+    expectEq(s.operands[1], "y", "second operand");
+}
+
+func test_cluster_with_attached_value(): void {
+    let s = scan(["-ad:"]);
+    expectEq(s.hits.len(), 2, "two options");
+    expectEq(s.hits[1].key, "d", "d");
+    expectEq(s.hits[1].value, ":", "attached value");
+}
+
+func test_value_in_next_argument(): void {
+    let s = scan(["-d", ",", "file"]);
+    expectEq(s.hits[0].value, ",", "next argument");
+    expectEq(s.operands[0], "file", "operand");
+}
+
+func test_long_forms(): void {
+    expectEq(scan(["--delimiter=x"]).hits[0].value, "x", "--name=value");
+    expectEq(scan(["--delimiter", "y"]).hits[0].value, "y", "--name value");
+    expectEq(scan(["--del=z"]).hits[0].value, "z", "abbreviation");
+    expectEq(scan(["--delimiter="]).hits[0].value, "", "empty value");
+}
+
+func test_exact_long_name_wins(): void {
+    let more = [opt("", "count", false, "count"), opt("", "counted", false, "counted")];
+    expectEq(scan_options(["--count"], more).unwrap().hits[0].key, "count", "exact");
+}
+
+func test_double_dash_and_lone_dash(): void {
+    let s = scan(["-", "--", "-a", "--all"]);
+    expectEq(s.hits.len(), 0, "no options");
+    expectEq(s.operands.len(), 3, "three operands");
+    expectEq(s.operands[0], "-", "lone dash");
+    expectEq(s.operands[1], "-a", "after --");
+}
+
+func test_help_stops_scanning(): void {
+    let s = scan(["--help", "-x"]);
+    expectEq(s.hits[0].key, "help", "help seen");
+    expect(scan_options(["-x", "--help"], specs()).is_err(), "error before --help");
+}
+
+func test_error_messages(): void {
+    expectEq(error_of(["-x"]), "invalid option -- 'x'", "unknown short");
+    expectEq(error_of(["-d"]), "option requires an argument -- 'd'", "short without value");
+    expectEq(error_of(["--nope"]), "unrecognized option '--nope'", "unknown long");
+    expectEq(error_of(["--nope=1"]), "unrecognized option '--nope=1'", "unknown long with value");
+    expectEq(error_of(["--delimiter"]), "option '--delimiter' requires an argument", "long without value");
+    expectEq(error_of(["--all=1"]), "option '--all' doesn't allow an argument", "value not allowed");
+    expectEq(error_of(["--co"]), "option '--co' is ambiguous; possibilities: '--count' '--complement'", "ambiguous");
+}

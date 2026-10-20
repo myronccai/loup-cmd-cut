@@ -1,64 +1,67 @@
 @mode(host.dual)
 
 from debug.assert import (expect, expectEq);
-from cli.args import (parse_args, DEFAULT_GREETING);
+from cli.args import (Mode, Options, parse_args, nul);
 
-func test_no_arguments(): void {
-    let none: list[string] = [];
-    let opts = parse_args(none).unwrap();
-    expectEq(opts.command, "", "no command");
-    expectEq(opts.operands.len(), 0, "no operands");
-    expectEq(opts.greeting, DEFAULT_GREETING, "default greeting");
-    expect(!opts.help and !opts.version and !opts.verbose and !opts.shout, "no flags set");
+func parse(argv: list[string]): Options {
+    return parse_args(argv).unwrap();
 }
 
-func test_command_and_operands(): void {
-    let opts = parse_args(["hello", "Ann"]).unwrap();
-    expectEq(opts.command, "hello", "command");
-    expectEq(opts.operands.len(), 1, "one operand");
-    expectEq(opts.operands[0], "Ann", "operand");
+func error_of(argv: list[string]): string {
+    return parse_args(argv).unwrap_err();
 }
 
-func test_flags_anywhere(): void {
-    let opts = parse_args(["-v", "hello", "--shout", "Ann"]).unwrap();
-    expect(opts.verbose, "verbose");
-    expect(opts.shout, "shout");
-    expectEq(opts.command, "hello", "command");
-    expectEq(opts.operands[0], "Ann", "operand");
+func test_fields_defaults(): void {
+    let opts = parse(["-f", "2"]);
+    expect(opts.mode == Mode.Fields, "fields");
+    expectEq(opts.delimiter, "\t", "TAB delimiter");
+    expectEq(opts.output_delimiter, "\t", "output follows input");
+    expect(!opts.explicit_output_delimiter, "not explicit");
+    expect(!opts.only_delimited, "no -s");
+    expectEq(opts.terminator, "\n", "newline");
+    expectEq(opts.files.len(), 0, "no files");
+}
+
+func test_modes(): void {
+    expect(parse(["-b1"]).mode == Mode.Bytes, "-b");
+    expect(parse(["-c1"]).mode == Mode.Characters, "-c");
+    expect(parse(["--characters=1"]).mode == Mode.Characters, "--characters");
+}
+
+func test_delimiters(): void {
+    let opts = parse(["-d:", "-f1", "--output-delimiter", " | "]);
+    expectEq(opts.delimiter, ":", "-d");
+    expectEq(opts.output_delimiter, " | ", "--output-delimiter");
+    expect(opts.explicit_output_delimiter, "explicit");
+    expectEq(parse(["-d", "", "-f1"]).delimiter, nul(), "empty -d is NUL");
+    expectEq(parse(["--output-delimiter=", "-f1"]).output_delimiter, nul(), "empty output delimiter is NUL");
+    expectEq(parse(["-d", "é", "-f1"]).delimiter, "é", "multibyte delimiter");
+}
+
+func test_flags_and_files(): void {
+    let opts = parse(["a.txt", "-sf", "1", "-z", "-n", "-", "--complement"]);
+    expect(opts.only_delimited, "-s");
+    expectEq(opts.terminator, nul(), "-z");
+    expectEq(opts.files.len(), 2, "two files");
+    expectEq(opts.files[1], "-", "dash");
+    expectEq(opts.ranges.len(), 1, "complemented");
+    expectEq(opts.ranges[0].lo, 2, "from 2");
 }
 
 func test_help_and_version(): void {
-    expect(parse_args(["--help"]).unwrap().help, "--help");
-    expect(parse_args(["-h"]).unwrap().help, "-h");
-    expect(parse_args(["--version"]).unwrap().version, "--version");
-    expect(parse_args(["-V"]).unwrap().version, "-V");
+    expect(parse(["--help"]).help, "--help");
+    expect(parse(["--version"]).version, "--version");
+    expect(parse(["--he", "-x"]).help, "abbreviated, before an error");
+    expect(parse(["-f0", "--help"]).help, "LIST errors come after --help");
 }
 
-func test_value_option_forms(): void {
-    expectEq(parse_args(["-g", "Hi"]).unwrap().greeting, "Hi", "-g VALUE");
-    expectEq(parse_args(["--greeting", "Hi"]).unwrap().greeting, "Hi", "--greeting VALUE");
-    expectEq(parse_args(["--greeting=a=b"]).unwrap().greeting, "a=b", "--greeting=VALUE keeps '='");
-}
-
-func test_double_dash_ends_options(): void {
-    let opts = parse_args(["hello", "--", "--shout"]).unwrap();
-    expect(!opts.shout, "--shout after -- is an operand");
-    expectEq(opts.operands[0], "--shout", "operand");
-}
-
-func test_lone_dash_is_operand(): void {
-    let opts = parse_args(["hello", "-"]).unwrap();
-    expectEq(opts.operands[0], "-", "operand");
-}
-
-func test_unknown_option(): void {
-    expectEq(parse_args(["--nope"]).unwrap_err(), "unknown option '--nope'", "error message");
-}
-
-func test_missing_value(): void {
-    expectEq(parse_args(["-g"]).unwrap_err(), "option '-g' requires a value", "error message");
-}
-
-func test_flag_with_value(): void {
-    expectEq(parse_args(["--shout=1"]).unwrap_err(), "option '--shout' does not take a value", "error message");
+func test_usage_errors(): void {
+    let none: list[string] = [];
+    expectEq(error_of(none), "you must specify a list of bytes, characters, or fields", "no list");
+    expectEq(error_of(["-f1", "-f2"]), "only one list may be specified", "two lists");
+    expectEq(error_of(["-c1", "-d:"]), "an input delimiter may be specified only when operating on fields", "-d without -f");
+    expectEq(error_of(["-b1", "-s"]), "suppressing non-delimited lines makes sense\n\tonly when operating on fields", "-s without -f");
+    expectEq(error_of(["-d", "ab", "-f1"]), "the delimiter must be a single character", "long delimiter");
+    expectEq(error_of(["-f", "x"]), "invalid field value 'x'", "bad list");
+    expectEq(error_of(["-q"]), "invalid option -- 'q'", "unknown option");
 }

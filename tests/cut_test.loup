@@ -1,0 +1,82 @@
+@mode(host.dual)
+
+from debug.assert import (expect, expectEq);
+from cli.args import (Options, parse_args, nul);
+from commands.cut import (cut_fields_line, cut_positions_line, split_records, cut_text, input_problem);
+
+func opts(argv: list[string]): Options {
+    return parse_args(argv).unwrap();
+}
+
+func field(line: string, argv: list[string]): string {
+    return cut_fields_line(line, opts(argv)).unwrap_or("<none>");
+}
+
+func test_select_fields(): void {
+    expectEq(field("a:b:c:d", ["-d:", "-f2"]), "b", "one field");
+    expectEq(field("a:b:c:d", ["-d:", "-f3,1"]), "a:c", "input order");
+    expectEq(field("a:b:c:d", ["-d:", "-f2-"]), "b:c:d", "open range");
+    expectEq(field("a:b:c:d", ["-d:", "-f9"]), "", "past the end");
+    expectEq(field("a::c", ["-d:", "-f2,3"]), ":c", "empty field");
+    expectEq(field("a\tb", ["-f2"]), "b", "TAB by default");
+}
+
+func test_lines_without_delimiter(): void {
+    expectEq(field("plain", ["-d:", "-f2"]), "plain", "printed whole");
+    expect(cut_fields_line("plain", opts(["-d:", "-f2", "-s"])).is_none(), "-s drops it");
+    expectEq(field("a:b", ["-d:", "-f3", "-s"]), "", "delimited but nothing selected");
+}
+
+func test_output_delimiter_and_complement(): void {
+    expectEq(field("a:b:c:d", ["-d:", "-f1,3-", "--output-delimiter=, "]), "a, c, d", "output delimiter");
+    expectEq(field("a:b:c:d", ["-d:", "-f2", "--complement"]), "a:c:d", "complement");
+}
+
+func test_characters(): void {
+    expectEq(cut_positions_line("abcdef", opts(["-c2-4"])), "bcd", "range");
+    expectEq(cut_positions_line("abcdef", opts(["-c-2,5-"])), "abef", "two ranges");
+    expectEq(cut_positions_line("héllo", opts(["-c2-3"])), "él", "characters, not bytes");
+    expectEq(cut_positions_line("abcdef", opts(["-c1-2,3-4", "--output-delimiter=:"])), "ab:cd", "adjacent ranges");
+    expectEq(cut_positions_line("abcdef", opts(["-c1-3,2-4,6", "--output-delimiter=:"])), "abcd:f", "merged ranges");
+    expectEq(cut_positions_line("abcdef", opts(["-c1,3,5", "--complement", "--output-delimiter=:"])), "b:d:f", "complement");
+    expectEq(cut_positions_line("abc", opts(["-c1,3"])), "ac", "no delimiter unless asked");
+}
+
+func test_bytes(): void {
+    expectEq(cut_positions_line("abcdef", opts(["-b2-3"])), "bc", "ASCII");
+    expectEq(cut_positions_line("héllo", opts(["-b1-3"])), "hé", "é is bytes 2-3");
+    expectEq(cut_positions_line("héllo", opts(["-b2"])), "é", "first byte selected");
+    expectEq(cut_positions_line("héllo", opts(["-b3"])), "", "only the second byte");
+    expectEq(cut_positions_line("héllo", opts(["-b4-"])), "llo", "after é");
+}
+
+func test_split_records(): void {
+    expectEq(split_records("a\nb\n", "\n").len(), 2, "final newline");
+    expectEq(split_records("a\nb", "\n").len(), 2, "no final newline");
+    expectEq(split_records("", "\n").len(), 0, "empty input");
+    expectEq(split_records("\n\n", "\n").len(), 2, "two empty lines");
+    expectEq(split_records("a" + nul() + "b", nul()).len(), 2, "NUL");
+}
+
+func test_cut_text(): void {
+    expectEq(cut_text("a:b\nc\nd:e", opts(["-d:", "-f2"])), "b\nc\ne\n", "terminator added");
+    expectEq(cut_text("a:b\nc\n", opts(["-d:", "-f2", "-s"])), "b\n", "suppressed");
+    expectEq(cut_text("ab\ncd\n", opts(["-c2"])), "b\nd\n", "characters");
+    let z = nul();
+    expectEq(cut_text("a:b" + z + "c:d" + z, opts(["-z", "-d:", "-f1"])), "a" + z + "c" + z, "-z");
+}
+
+func test_newline_as_delimiter(): void {
+    expectEq(cut_text("a\nb\nc\n", opts(["-d\n", "-f2"])), "b\n", "lines are fields");
+    expectEq(cut_text("a\nb\nc", opts(["-d\n", "-f1,3"])), "a\nc\n", "joined by newline");
+    expectEq(cut_text("abc\n", opts(["-d\n", "-f2"])), "\n", "GNU's quirk without -s");
+    expectEq(cut_text("abc\n", opts(["-d\n", "-f2", "-s"])), "", "and with -s");
+    expectEq(cut_text("", opts(["-d\n", "-f1"])), "", "empty");
+}
+
+func test_input_problem(): void {
+    expectEq(input_problem("-"), "", "standard input");
+    expectEq(input_problem("tests/cut_test.loup"), "", "a file");
+    expectEq(input_problem("tests"), "Is a directory", "a directory");
+    expectEq(input_problem("no/such/file"), "No such file or directory", "missing");
+}

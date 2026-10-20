@@ -1,0 +1,229 @@
+@mode(host.dual)
+
+# cut: prints the selected fields, characters or bytes of each record of
+# its input. Each input is read whole; cut_text returns its complete output.
+
+import io.fs as fs;
+from appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE);
+from cli.args import (Mode, Options);
+from cli.quote import (quote_name);
+from commands.ranges import (is_selected, starts_range);
+
+# The output for one record in field mode, without the terminator, or None
+# when -s drops a record that has no delimiter.
+pub func cut_fields_line(line: string, opts: Options): Option[string] {
+    if (!line.contains(opts.delimiter)) {
+        if (opts.only_delimited) {
+            return None;
+        }
+        return Some(line);
+    }
+    var picked: list[string] = [];
+    var n = 1;
+    for (field in line.split(opts.delimiter)) {
+        if (is_selected(opts.ranges, n)) {
+            picked.push(field);
+        }
+        n += 1;
+    }
+    return Some(picked.join(opts.output_delimiter));
+}
+
+# The output for one record in character or byte mode, without the
+# terminator. A character occupies one position with -c and its UTF-8
+# length with -b; it is kept when its first position is selected.
+pub func cut_positions_line(line: string, opts: Options): string {
+    let bytes = opts.mode == Mode.Bytes;
+    var out: list[string] = [];
+    var pos = 1;
+    var printed = false;
+    for (ch in line) {
+        let width = if (bytes) { ch.byteLength() } else { 1 };
+        if (is_selected(opts.ranges, pos)) {
+            if (opts.explicit_output_delimiter and printed and starts_range(opts.ranges, pos, pos + width - 1)) {
+                out.push(opts.output_delimiter);
+            }
+            out.push(ch);
+            printed = true;
+        }
+        pos += width;
+    }
+    return out.join("");
+}
+
+# Splits an input into records on `terminator`. A final terminator ends
+# the last record rather than starting an empty one.
+pub func split_records(text: string, terminator: string): list[string] {
+    var records: list[string] = [];
+    if (text.len() == 0) {
+        return records;
+    }
+    let pieces = text.split(terminator);
+    var n = pieces.len();
+    if (pieces[n - 1].len() == 0) {
+        n -= 1;
+    }
+    var i = 0;
+    while (i < n) {
+        records.push(pieces[i]);
+        i += 1;
+    }
+    return records;
+}
+
+# Field mode when the delimiter is the terminator itself (`-d $'\n'`).
+# GNU cut then reads the whole input as one record whose fields are its
+# lines, with corner cases (a final newline, `-s`) that only its own loop
+# explains, so this is a transcription of GNU's cut_fields. EOF is "".
+pub func cut_whole_input(text: string, opts: Options): string {
+    let delim = opts.delimiter;
+    let term = opts.terminator;
+    var cs: list[string] = [];
+    for (ch in text) {
+        cs.push(ch);
+    }
+    let n = cs.len();
+    var out: list[string] = [];
+    if (n == 0) {
+        return "";
+    }
+    var p = 0;
+    var field_idx = 1;
+    var found = false;
+    let buffer_first = opts.only_delimited != !is_selected(opts.ranges, 1);
+    var c = "x";
+    while (true) {
+        if (field_idx == 1 and buffer_first) {
+            if (p >= n) {
+                break;
+            }
+            var buf: list[string] = [];
+            while (p < n) {
+                let ch = cs[p];
+                p += 1;
+                buf.push(ch);
+                if (ch == delim or ch == term) {
+                    break;
+                }
+            }
+            let last = buf[buf.len() - 1];
+            c = "x";
+            if (last != delim) {
+                if (!opts.only_delimited) {
+                    out.push(buf.join(""));
+                    if (last != term) {
+                        out.push(term);
+                    }
+                    c = term;
+                }
+                continue;
+            }
+            if (is_selected(opts.ranges, 1)) {
+                out.push(buf.slice(0, buf.len() - 1).join(""));
+                if (delim != term or p < n) {
+                    found = true;
+                }
+            }
+            field_idx += 1;
+        }
+
+        var prev_c = c;
+        let keep = is_selected(opts.ranges, field_idx);
+        if (keep) {
+            if (found) {
+                out.push(opts.output_delimiter);
+            }
+            found = true;
+        }
+        c = "";
+        while (p < n) {
+            let ch = cs[p];
+            p += 1;
+            if (ch == delim or ch == term) {
+                c = ch;
+                break;
+            }
+            if (keep) {
+                out.push(ch);
+            }
+            prev_c = ch;
+        }
+
+        if (delim == term and c == delim and p >= n) {
+            c = "";
+        }
+        if (c == delim) {
+            field_idx += 1;
+        } else if (c == term or c == "") {
+            if (found or !(opts.only_delimited and field_idx == 1)) {
+                if (c == term or prev_c != term or delim == term) {
+                    out.push(term);
+                }
+            }
+            if (c == "") {
+                break;
+            }
+            field_idx = 1;
+            found = false;
+        }
+    }
+    return out.join("");
+}
+
+# The complete output for one input.
+pub func cut_text(text: string, opts: Options): string {
+    if (opts.mode == Mode.Fields and opts.delimiter == opts.terminator) {
+        return cut_whole_input(text, opts);
+    }
+    var out: list[string] = [];
+    for (rec in split_records(text, opts.terminator)) {
+        if (opts.mode == Mode.Fields) {
+            match cut_fields_line(rec, opts) {
+                Some(kept) => {
+                    out.push(kept);
+                    out.push(opts.terminator);
+                },
+                None => {},
+            }
+        } else {
+            out.push(cut_positions_line(rec, opts));
+            out.push(opts.terminator);
+        }
+    }
+    return out.join("");
+}
+
+# Why the input `name` cannot be read, or "" when it can as far as can be
+# told without opening it. Checked first because the native runtime does
+# not let the program catch the IoError from reading such a file.
+pub func input_problem(name: string): string {
+    if (name == "-") {
+        return "";
+    }
+    if (!exists(name)) {
+        return "No such file or directory";
+    }
+    if (fs.isDir(name)) {
+        return "Is a directory";
+    }
+    return "";
+}
+
+pub func run_cut(opts: Options): int {
+    var status = EXIT_OK;
+    var files = opts.files;
+    if (files.len() == 0) {
+        files.push("-");
+    }
+    for (name in files) {
+        let problem = input_problem(name);
+        if (problem.len() > 0) {
+            printErr(i"{$ APP_NAME $}: {$ quote_name(name) $}: {$ problem $}");
+            status = EXIT_FAILURE;
+            continue;
+        }
+        let path = if (name == "-") { "/dev/stdin" } else { name };
+        print(cut_text(readText(path), opts));
+    }
+    return status;
+}

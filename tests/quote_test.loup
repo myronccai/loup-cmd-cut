@@ -1,0 +1,31 @@
+@mode(host.dual)
+
+from debug.assert import (expectEq);
+from cli.quote import (quote_name);
+
+func test_plain_names_are_unquoted(): void {
+    expectEq(quote_name("notes.txt"), "notes.txt", "plain");
+    expectEq(quote_name("dir/a-b_c:1,2+3%4@x"), "dir/a-b_c:1,2+3%4@x", "safe punctuation");
+    expectEq(quote_name("x#"), "x#", "# inside");
+    expectEq(quote_name("é"), "é", "non-ASCII");
+}
+
+func test_special_names_are_single_quoted(): void {
+    expectEq(quote_name(""), "''", "empty");
+    expectEq(quote_name("a b"), "'a b'", "space");
+    expectEq(quote_name("x*"), "'x*'", "glob");
+    expectEq(quote_name("#x"), "'#x'", "leading #");
+    expectEq(quote_name("~x"), "'~x'", "leading ~");
+    expectEq(quote_name("a=b"), "'a=b'", "equals");
+}
+
+func test_single_quote(): void {
+    expectEq(quote_name("it's"), "\"it's\"", "double quotes");
+    expectEq(quote_name("it's $a"), "'it'\\''s $a'", "escaped single quote");
+}
+
+func test_control_characters(): void {
+    expectEq(quote_name("x\ty"), "'x'$'\\t''y'", "tab");
+    expectEq(quote_name("a\nb"), "'a'$'\\n''b'", "newline");
+    expectEq(quote_name(str(char.of(1))), "''$'\\001'''", "octal");
+}

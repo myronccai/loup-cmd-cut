@@ -1,0 +1,212 @@
+@mode(host.dual)
+
+# Range lists: the LIST argument of -b, -c and -f, such as `1,3-5,7-`.
+#
+# parse_list follows GNU cut's set_fields: a small state machine over the
+# characters of the list. Digits build a number, `-` starts a range, and a
+# comma, a blank or the end of the list closes the current item. The result
+# is sorted by start and overlapping ranges are merged.
+
+# The upper bound of an open range such as `7-`: the largest int.
+pub const END: int = 9223372036854775807;
+
+# Positions lo..hi, counted from 1, both included.
+pub struct Range {
+    pub lo: int;
+    pub hi: int;
+}
+
+func digit_value(ch: string): int {
+    let i = "0123456789".index_of(ch);
+    return if (ch.len() == 1 and i >= 0) { i } else { -1 };
+}
+
+func is_separator(ch: string): bool {
+    return ch == "," or ch == " " or ch == "\t";
+}
+
+# The run of digits in `chars` from index `start`, for error messages.
+func digits_from(chars: list[string], start: int): string {
+    var out: list[string] = [];
+    var i = start;
+    while (i < chars.len() and digit_value(chars[i]) >= 0) {
+        out.push(chars[i]);
+        i += 1;
+    }
+    return out.join("");
+}
+
+# Sorts ranges by start and merges those that overlap. Adjacent ranges such
+# as 1-2 and 3-4 stay separate, as in GNU cut.
+pub func merge(ranges: list[Range]): list[Range] {
+    var sorted: list[Range] = [];
+    for (r in ranges) {
+        sorted.push(r);
+    }
+    sorted.sort(func(a: Range, b: Range): int {
+        return if (a.lo < b.lo) { -1 } else if (a.lo > b.lo) { 1 } else { 0 };
+    });
+    var out: list[Range] = [];
+    if (sorted.len() == 0) {
+        return out;
+    }
+    var lo = sorted[0].lo;
+    var hi = sorted[0].hi;
+    var i = 1;
+    while (i < sorted.len()) {
+        let r = sorted[i];
+        if (r.lo <= hi) {
+            if (r.hi > hi) {
+                hi = r.hi;
+            }
+        } else {
+            out.push(Range(lo = lo, hi = hi));
+            lo = r.lo;
+            hi = r.hi;
+        }
+        i += 1;
+    }
+    out.push(Range(lo = lo, hi = hi));
+    return out;
+}
+
+# Parses LIST. `positions` picks the wording of the messages: byte and
+# character positions (-b, -c) or fields (-f).
+pub func parse_list(text: string, positions: bool): Result[list[Range], string] {
+    let from_one = if (positions) {
+        "byte/character positions are numbered from 1"
+    } else {
+        "fields are numbered from 1"
+    };
+    var chars: list[string] = [];
+    for (ch in text) {
+        chars.push(ch);
+    }
+
+    var ranges: list[Range] = [];
+    var initial = 1;
+    var value = 0;
+    var lhs = false;
+    var rhs = false;
+    var dash = false;
+    var num_start = -1;
+    var i = 0;
+    while (true) {
+        let ch = if (i < chars.len()) { chars[i] } else { "" };
+        if (ch == "-") {
+            num_start = -1;
+            if (dash) {
+                return Err(if (positions) { "invalid byte or character range" } else { "invalid field range" });
+            }
+            dash = true;
+            if (lhs and value == 0) {
+                return Err(from_one);
+            }
+            initial = if (lhs) { value } else { 1 };
+            value = 0;
+        } else if (ch == "" or is_separator(ch)) {
+            num_start = -1;
+            if (dash) {
+                dash = false;
+                if (!lhs and !rhs) {
+                    return Err("invalid range with no endpoint: -");
+                }
+                if (!rhs) {
+                    ranges.push(Range(lo = initial, hi = END));
+                } else {
+                    if (value < initial) {
+                        return Err("invalid decreasing range");
+                    }
+                    ranges.push(Range(lo = initial, hi = value));
+                }
+            } else {
+                if (value == 0) {
+                    return Err(from_one);
+                }
+                ranges.push(Range(lo = value, hi = value));
+            }
+            value = 0;
+            if (ch == "") {
+                break;
+            }
+            lhs = false;
+            rhs = false;
+        } else if (digit_value(ch) >= 0) {
+            if (num_start < 0) {
+                num_start = i;
+            }
+            if (dash) {
+                rhs = true;
+            } else {
+                lhs = true;
+            }
+            let d = digit_value(ch);
+            if (value > (END - 1 - d) / 10) {
+                let number = digits_from(chars, num_start);
+                return Err(if (positions) {
+                    i"byte/character offset '{$ number $}' is too large"
+                } else {
+                    i"field number '{$ number $}' is too large"
+                });
+            }
+            value = value * 10 + d;
+        } else {
+            let rest = text.slice(i);
+            return Err(if (positions) {
+                i"invalid byte/character position '{$ rest $}'"
+            } else {
+                i"invalid field value '{$ rest $}'"
+            });
+        }
+        i += 1;
+    }
+
+    if (ranges.len() == 0) {
+        return Err(if (positions) { "missing list of byte/character positions" } else { "missing list of fields" });
+    }
+    return Ok(merge(ranges));
+}
+
+# The positions that sorted, merged `ranges` leave out.
+pub func complement(ranges: list[Range]): list[Range] {
+    var out: list[Range] = [];
+    if (ranges.len() == 0) {
+        out.push(Range(lo = 1, hi = END));
+        return out;
+    }
+    if (ranges[0].lo > 1) {
+        out.push(Range(lo = 1, hi = ranges[0].lo - 1));
+    }
+    var i = 1;
+    while (i < ranges.len()) {
+        if (ranges[i - 1].hi + 1 != ranges[i].lo) {
+            out.push(Range(lo = ranges[i - 1].hi + 1, hi = ranges[i].lo - 1));
+        }
+        i += 1;
+    }
+    let last = ranges[ranges.len() - 1];
+    if (last.hi < END) {
+        out.push(Range(lo = last.hi + 1, hi = END));
+    }
+    return out;
+}
+
+# Whether position `n` is in one of `ranges`.
+pub func is_selected(ranges: list[Range], n: int): bool {
+    for (r in ranges) {
+        if (r.lo <= n and n <= r.hi) {
+            return true;
+        }
+    }
+    return false;
+}
+
+# Whether one of `ranges` starts at a position from `first` to `last`.
+pub func starts_range(ranges: list[Range], first: int, last: int): bool {
+    for (r in ranges) {
+        if (first <= r.lo and r.lo <= last) {
+            return true;
+        }
+    }
+    return false;
+}

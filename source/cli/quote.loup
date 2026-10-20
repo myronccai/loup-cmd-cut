@@ -1,0 +1,97 @@
+@mode(host.dual)
+
+# File names in error messages, quoted the way the GNU coreutils quote them
+# (gnulib's "shell-escape" style): a plain name is printed as it is, one
+# with shell metacharacters is put in single quotes, and control characters
+# are written as $'\t' or $'\NNN'. Non-ASCII characters are printed as they
+# are, as in a UTF-8 locale.
+
+# Characters that make a name need quotes anywhere in it.
+const SPECIAL: string = " !\"$&()*;<=>?[\\^`|'";
+
+# The code of an ASCII character, or -1.
+func ascii_code(ch: string): int {
+    var n = 0;
+    while (n < 128) {
+        if (str(char.of(n)) == ch) {
+            return n;
+        }
+        n += 1;
+    }
+    return -1;
+}
+
+func is_control(ch: string): bool {
+    if (ch.byteLength() != 1) {
+        return false;
+    }
+    let code = ascii_code(ch);
+    return (code >= 0 and code < 32) or code == 127;
+}
+
+func needs_quotes(name: string): bool {
+    if (name.len() == 0 or name == "{" or name == "}") {
+        return true;
+    }
+    if (name.startsWith("#") or name.startsWith("~")) {
+        return true;
+    }
+    for (ch in name) {
+        if (SPECIAL.contains(ch) or is_control(ch)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+func octal3(n: int): string {
+    let digits = "01234567";
+    return digits.slice((n / 64) % 8, (n / 64) % 8 + 1)
+        + digits.slice((n / 8) % 8, (n / 8) % 8 + 1)
+        + digits.slice(n % 8, n % 8 + 1);
+}
+
+# The C escape for a control character, without the backslash.
+func control_escape(ch: string): string {
+    return match ch {
+        "\u{7}" => "a",
+        "\u{8}" => "b",
+        "\u{c}" => "f",
+        "\n" => "n",
+        "\r" => "r",
+        "\t" => "t",
+        "\u{b}" => "v",
+        _ => octal3(ascii_code(ch)),
+    };
+}
+
+pub func quote_name(name: string): string {
+    if (!needs_quotes(name)) {
+        return name;
+    }
+    var has_control = false;
+    var double_ok = true;
+    for (ch in name) {
+        if (is_control(ch)) {
+            has_control = true;
+        }
+        if ("$`\\\"!".contains(ch)) {
+            double_ok = false;
+        }
+    }
+    if (name.contains("'") and double_ok and !has_control) {
+        return "\"" + name + "\"";
+    }
+    var out: list[string] = ["'"];
+    for (ch in name) {
+        if (ch == "'") {
+            out.push("'\\''");
+        } else if (is_control(ch)) {
+            out.push("'$'\\" + control_escape(ch) + "''");
+        } else {
+            out.push(ch);
+        }
+    }
+    out.push("'");
+    return out.join("");
+}
