@@ -75,6 +75,14 @@ func test_position_wording(): void {
     expectEq(parse_list("1-99999999999999999999", true).unwrap_err(), "byte/character offset '99999999999999999999' is too large", "too large");
 }
 
+func test_range_methods(): void {
+    let r = Range(lo = 3, hi = 5);
+    expect(r.contains(3) and r.contains(5), "both ends included");
+    expect(!r.contains(2) and !r.contains(6), "outside");
+    expect(r.starts_in(1, 3) and r.starts_in(3, 3), "starts at 3");
+    expect(!r.starts_in(4, 9), "starts before 4");
+}
+
 func test_selection(): void {
     let r = parse_list("2-3,6-", false).unwrap();
     expect(!is_selected(r, 1), "1");

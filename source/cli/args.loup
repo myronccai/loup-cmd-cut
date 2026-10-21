@@ -38,19 +38,29 @@ pub func nul(): string {
     return str(char.of(0));
 }
 
+# One entry of the option table. Every argument has a default, so each
+# entry names only what the option has; its key is the letter, or the
+# long name when there is no letter. A helper in this module rather than
+# defaults on cli.getopt's opt(): natively, named arguments to a function
+# of another module crash, and loup run binds them by position.
+func spec(short: string = "", long: string = "", takes_value: bool = false): OptSpec {
+    let key = if (short != "") { short } else { long };
+    return opt(short, long, takes_value, key);
+}
+
 func specs(): list[OptSpec] {
     return [
-        opt("b", "bytes", true, "b"),
-        opt("c", "characters", true, "c"),
-        opt("d", "delimiter", true, "d"),
-        opt("f", "fields", true, "f"),
-        opt("n", "", false, "n"),
-        opt("", "complement", false, "complement"),
-        opt("s", "only-delimited", false, "s"),
-        opt("", "output-delimiter", true, "output-delimiter"),
-        opt("z", "zero-terminated", false, "z"),
-        opt("", "help", false, "help"),
-        opt("", "version", false, "version"),
+        spec(short = "b", long = "bytes", takes_value = true),
+        spec(short = "c", long = "characters", takes_value = true),
+        spec(short = "d", long = "delimiter", takes_value = true),
+        spec(short = "f", long = "fields", takes_value = true),
+        spec(short = "n"),
+        spec(long = "complement"),
+        spec(short = "s", long = "only-delimited"),
+        spec(long = "output-delimiter", takes_value = true),
+        spec(short = "z", long = "zero-terminated"),
+        spec(long = "help"),
+        spec(long = "version"),
     ];
 }
 

@@ -10,15 +10,28 @@
 # range, and a comma, a blank or the end of the list closes the current
 # item. The result is sorted by start and overlapping ranges are merged
 # (merge); complement inverts such a list, and is_selected and
-# starts_range answer the questions cut asks per position.
+# starts_range answer the questions cut asks per position through the
+# Range methods contains and starts_in.
 
-# The upper bound of an open range such as `7-`: the largest int.
-pub const END: int = 9223372036854775807;
+## The upper bound of an open range such as `7-`: the largest int.
+pub const END: int = 9_223_372_036_854_775_807;
 
-# Positions lo..hi, counted from 1, both included.
+## Positions lo..hi, counted from 1, both included. Built only in this
+## module (natively a struct literal elsewhere would disagree about its
+## layout); other modules call its methods.
 pub struct Range {
     pub lo: int;
     pub hi: int;
+
+    ## Whether position `n` is in the range.
+    pub func contains(n: int): bool {
+        return this.lo <= n and n <= this.hi;
+    }
+
+    ## Whether the range starts at a position from `first` to `last`.
+    pub func starts_in(first: int, last: int): bool {
+        return first <= this.lo and this.lo <= last;
+    }
 }
 
 func digit_value(ch: string): int {
@@ -41,8 +54,8 @@ func digits_from(chars: list[string], start: int): string {
     return out.join("");
 }
 
-# Sorts ranges by start and merges those that overlap. Adjacent ranges such
-# as 1-2 and 3-4 stay separate, as in GNU cut.
+## Sorts ranges by start and merges those that overlap. Adjacent ranges
+## such as 1-2 and 3-4 stay separate, as in GNU cut.
 pub func merge(ranges: list[Range]): list[Range] {
     var sorted: list[Range] = [];
     for (r in ranges) {
@@ -55,28 +68,28 @@ pub func merge(ranges: list[Range]): list[Range] {
     if (sorted.len() == 0) {
         return out;
     }
-    var lo = sorted[0].lo;
-    var hi = sorted[0].hi;
+    # `cur` is the merged range being grown: an overlapping range extends
+    # it (a copy with a new `hi`), any other range closes it.
+    var cur = sorted[0];
     var i = 1;
     while (i < sorted.len()) {
         let r = sorted[i];
-        if (r.lo <= hi) {
-            if (r.hi > hi) {
-                hi = r.hi;
+        if (r.lo <= cur.hi) {
+            if (r.hi > cur.hi) {
+                cur = cur with (hi = r.hi);
             }
         } else {
-            out.push(Range(lo = lo, hi = hi));
-            lo = r.lo;
-            hi = r.hi;
+            out.push(cur);
+            cur = r;
         }
         i += 1;
     }
-    out.push(Range(lo = lo, hi = hi));
+    out.push(cur);
     return out;
 }
 
-# Parses LIST. `positions` picks the wording of the messages: byte and
-# character positions (-b, -c) or fields (-f).
+## Parses LIST. `positions` picks the wording of the messages: byte and
+## character positions (-b, -c) or fields (-f).
 pub func parse_list(text: string, positions: bool): Result[list[Range], string] {
     let from_one = if (positions) {
         "byte/character positions are numbered from 1"
@@ -176,7 +189,7 @@ pub func parse_list(text: string, positions: bool): Result[list[Range], string] 
     return Ok(merge(ranges));
 }
 
-# The positions that sorted, merged `ranges` leave out.
+## The positions that sorted, merged `ranges` leave out.
 pub func complement(ranges: list[Range]): list[Range] {
     var out: list[Range] = [];
     if (ranges.len() == 0) {
@@ -200,20 +213,20 @@ pub func complement(ranges: list[Range]): list[Range] {
     return out;
 }
 
-# Whether position `n` is in one of `ranges`.
+## Whether position `n` is in one of `ranges`.
 pub func is_selected(ranges: list[Range], n: int): bool {
     for (r in ranges) {
-        if (r.lo <= n and n <= r.hi) {
+        if (r.contains(n)) {
             return true;
         }
     }
     return false;
 }
 
-# Whether one of `ranges` starts at a position from `first` to `last`.
+## Whether one of `ranges` starts at a position from `first` to `last`.
 pub func starts_range(ranges: list[Range], first: int, last: int): bool {
     for (r in ranges) {
-        if (first <= r.lo and r.lo <= last) {
+        if (r.starts_in(first, last)) {
             return true;
         }
     }

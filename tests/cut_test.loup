@@ -8,7 +8,7 @@
 # file with Stage0 (`loup-bootstrap test`, source/ on LOUPPATH), one test
 # per `func test_*()`. It is not part of the binary.
 
-from debug.assert import (expect, expectEq);
+from debug.assert import (expect, expectEq, expectSome);
 from cli.args import (Options, parse_args, nul);
 from commands.cut import (cut_fields_line, cut_positions_line, split_records, cut_text, input_problem);
 
@@ -16,8 +16,9 @@ func opts(argv: list[string]): Options {
     return parse_args(argv).unwrap();
 }
 
+# The output for `line`, which these tests expect cut to print.
 func field(line: string, argv: list[string]): string {
-    return cut_fields_line(line, opts(argv)).unwrap_or("<none>");
+    return expectSome(cut_fields_line(line, opts(argv)), "a printed record");
 }
 
 func test_select_fields(): void {
