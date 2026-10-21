@@ -1,5 +1,13 @@
 @mode(host.dual)
 
+# Unit tests for range lists (commands.ranges): the forms of an item,
+# separators, sorting and merging, complement, errors and their wording,
+# and position lookups.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this
+# file with Stage0 (`loup-bootstrap test`, source/ on LOUPPATH), one test
+# per `func test_*()`. It is not part of the binary.
+
 from debug.assert import (expect, expectEq);
 from commands.ranges import (END, Range, parse_list, complement, merge, is_selected, starts_range);
 

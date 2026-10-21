@@ -5,6 +5,9 @@
 # with shell metacharacters is put in single quotes, and control characters
 # are written as $'\t' or $'\NNN'. Non-ASCII characters are printed as they
 # are, as in a UTF-8 locale.
+#
+# Runtime: host.dual. Compiled into the native binary build/cut by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 # Characters that make a name need quotes anywhere in it.
 const SPECIAL: string = " !\"$&()*;<=>?[\\^`|'";

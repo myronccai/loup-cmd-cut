@@ -2,6 +2,16 @@
 
 # cut: prints the selected fields, characters or bytes of each record of
 # its input. Each input is read whole; cut_text returns its complete output.
+#
+# Runtime: host.dual. Compiled into the native binary build/cut by `make
+# build`; `loup run source/main.loup` interprets the same code. Only
+# run_cut prints, so the unit tests check cut_text's result directly.
+#
+# Structure: one record in field mode (cut_fields_line) and in character
+# or byte mode (cut_positions_line); splitting an input into records; the
+# special case of a delimiter equal to the terminator (cut_whole_input, a
+# transcription of GNU's loop); cut_text, which picks between them; and
+# the file checks and loop of run_cut.
 
 import io.fs as fs;
 from appinfo import (APP_NAME, EXIT_OK, EXIT_FAILURE);
@@ -87,6 +97,15 @@ pub func cut_whole_input(text: string, opts: Options): string {
     if (n == 0) {
         return "";
     }
+    # `cs` stands for GNU's stream (`p` is the read position), `c` for the
+    # character that ended the last field, `found` for "a selected field
+    # has been printed on this output line".
+    #
+    # A record without a delimiter has exactly one field. The first field
+    # must be read ahead (buffered) only when the record's fate depends on
+    # whether a delimiter follows: under -s with field 1 selected, or
+    # without -s with field 1 not selected. Otherwise it is copied or
+    # skipped as it is read, like any other field.
     var p = 0;
     var field_idx = 1;
     var found = false;
@@ -127,6 +146,8 @@ pub func cut_whole_input(text: string, opts: Options): string {
             field_idx += 1;
         }
 
+        # Copy (or skip) one field, up to a delimiter, a terminator or the
+        # end of the input.
         var prev_c = c;
         let keep = is_selected(opts.ranges, field_idx);
         if (keep) {
@@ -149,12 +170,16 @@ pub func cut_whole_input(text: string, opts: Options): string {
             prev_c = ch;
         }
 
+        # With the delimiter equal to the terminator, a final one ends the
+        # input instead of starting another field.
         if (delim == term and c == delim and p >= n) {
             c = "";
         }
         if (c == delim) {
             field_idx += 1;
         } else if (c == term or c == "") {
+            # End of a record: terminate the output line unless -s dropped
+            # it, then start the next record at field 1.
             if (found or !(opts.only_delimited and field_idx == 1)) {
                 if (c == term or prev_c != term or delim == term) {
                     out.push(term);
@@ -215,6 +240,8 @@ pub func run_cut(opts: Options): int {
     if (files.len() == 0) {
         files.push("-");
     }
+    # Each input is checked, then read whole and cut at once; a bad input
+    # is reported and skipped, and the others are still cut.
     for (name in files) {
         let problem = input_problem(name);
         if (problem.len() > 0) {

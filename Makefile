@@ -17,7 +17,7 @@ TEST_ARGS      ?=
 
 all: build
 
-# Run from source, e.g. `make run ARGS="-e 'a\tb'"`.
+# Run from source, e.g. `make run ARGS="-d: -f1 /etc/passwd"`.
 run:
 	$(LOUP) run source/main.loup -- $(ARGS)
 

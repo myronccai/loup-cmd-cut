@@ -1,5 +1,13 @@
 @mode(host.dual)
 
+# Unit tests for cutting (commands.cut): fields, lines without a
+# delimiter, output delimiter and complement, characters, bytes, record
+# splitting, whole inputs, a newline as the delimiter, and file checks.
+#
+# Runtime: host.dual, run by the test runner: `make test` interprets this
+# file with Stage0 (`loup-bootstrap test`, source/ on LOUPPATH), one test
+# per `func test_*()`. It is not part of the binary.
+
 from debug.assert import (expect, expectEq);
 from cli.args import (Options, parse_args, nul);
 from commands.cut import (cut_fields_line, cut_positions_line, split_records, cut_text, input_problem);

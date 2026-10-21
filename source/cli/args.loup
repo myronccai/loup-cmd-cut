@@ -4,6 +4,9 @@
 # (cli/getopt.loup) and then checked in GNU cut's order: the checks GNU
 # makes while reading options come first, in command-line order, then the
 # ones it makes afterwards, and last the LIST itself.
+#
+# Runtime: host.dual. Compiled into the native binary build/cut by `make
+# build`; `loup run source/main.loup` interprets the same code.
 
 from cli.getopt import (OptSpec, opt, scan_options);
 from commands.ranges import (Range, parse_list, complement);

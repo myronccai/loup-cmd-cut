@@ -2,10 +2,15 @@
 
 # Range lists: the LIST argument of -b, -c and -f, such as `1,3-5,7-`.
 #
-# parse_list follows GNU cut's set_fields: a small state machine over the
-# characters of the list. Digits build a number, `-` starts a range, and a
-# comma, a blank or the end of the list closes the current item. The result
-# is sorted by start and overlapping ranges are merged.
+# Runtime: host.dual. Compiled into the native binary build/cut by `make
+# build`; `loup run source/main.loup` interprets the same code.
+#
+# Structure: parse_list follows GNU cut's set_fields: a small state machine
+# over the characters of the list. Digits build a number, `-` starts a
+# range, and a comma, a blank or the end of the list closes the current
+# item. The result is sorted by start and overlapping ranges are merged
+# (merge); complement inverts such a list, and is_selected and
+# starts_range answer the questions cut asks per position.
 
 # The upper bound of an open range such as `7-`: the largest int.
 pub const END: int = 9223372036854775807;
@@ -83,6 +88,10 @@ pub func parse_list(text: string, positions: bool): Result[list[Range], string] 
         chars.push(ch);
     }
 
+    # State of the item being read: `value` is the number so far, `dash`
+    # whether its `-` has been seen, `lhs` and `rhs` whether digits came
+    # before and after that `-`, and `initial` the range's start (1 for
+    # `-M`). One character past the end, "", closes the last item.
     var ranges: list[Range] = [];
     var initial = 1;
     var value = 0;
